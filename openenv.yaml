@@ -1,0 +1,60 @@
+name: customer-service-env
+version: "1.0.0"
+description: >
+  A production RL environment simulating an e-commerce customer service system.
+  An AI agent resolves customer queries (refunds, delays, fraud) using tool calls.
+  Partial observability, stochastic state, and multi-factor reward shaping.
+
+author: your-hf-username
+license: MIT
+
+environment:
+  entry_point: server.app:app
+  host: 0.0.0.0
+  port: 8000
+
+action_space:
+  type: discrete
+  actions:
+    - GET_ORDER_STATUS
+    - GET_USER_HISTORY
+    - CHECK_REFUND_POLICY
+    - ISSUE_REFUND
+    - DENY_REQUEST
+    - ESCALATE_TO_HUMAN
+    - ASK_FOR_MORE_INFO
+
+observation_space:
+  customer_message: string
+  last_action_result: string
+  conversation_history: list
+  step_count: integer
+  done: boolean
+  reward: float
+  available_actions: list
+
+tasks:
+  - id: easy_refund
+    name: Simple Refund Resolution
+    difficulty: easy
+    description: Customer has a damaged item. Order is eligible for refund. Agent must identify and issue it efficiently.
+
+  - id: medium_delayed_order
+    name: Delayed Order with Missing Info
+    difficulty: medium
+    description: Order is delayed but customer hasn't provided order ID. Agent must gather info then decide.
+
+  - id: hard_fraud_detection
+    name: Fraud Detection and Denial
+    difficulty: hard
+    description: High fraud score. Customer claims non-delivery but tracking shows delivered. Agent must detect and deny.
+
+reward:
+  type: continuous
+  range: [0.0, 1.0]
+  partial_credit: true
+
+hardware:
+  min_cpu: 1
+  min_ram_gb: 1
+  gpu_required: false
