@@ -1,7 +1,7 @@
 """
 Inference Script — Customer Service RL Environment
 ===================================================
-MANDATORY:
+MANDATORY ENV VARS:
 - API_BASE_URL   The API endpoint for the LLM
 - MODEL_NAME     The model identifier to use for inference
 - HF_TOKEN       Your Hugging Face / API key
@@ -14,10 +14,8 @@ Usage:
 """
 
 import os
-import re
-import json
 import textwrap
-from typing import List, Optional
+from typing import List
 from openai import OpenAI
 
 from client import CustomerServiceEnvClient
@@ -29,10 +27,10 @@ API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
 MODEL_NAME   = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 
-MAX_STEPS        = 8
-TEMPERATURE      = 0.2
-MAX_TOKENS       = 200
-FALLBACK_ACTION  = "ASK_FOR_MORE_INFO"
+MAX_STEPS       = 8
+TEMPERATURE     = 0.2
+MAX_TOKENS      = 200
+FALLBACK_ACTION = "ASK_FOR_MORE_INFO"
 
 VALID_ACTIONS = [
     "GET_ORDER_STATUS",
@@ -70,17 +68,12 @@ SYSTEM_PROMPT = textwrap.dedent("""
 """).strip()
 
 
-def build_user_prompt(
-    step: int,
-    obs: dict,
-    history: List[str],
-) -> str:
-    customer_msg  = obs.get("customer_message", "")
-    last_result   = obs.get("last_action_result") or "None"
-    available     = obs.get("available_actions", VALID_ACTIONS)
-    patience      = obs.get("metadata", {}).get("patience_level", "?")
-    difficulty    = obs.get("metadata", {}).get("task_difficulty", "?")
-
+def build_user_prompt(step: int, obs: dict, history: List[str]) -> str:
+    customer_msg = obs.get("customer_message", "")
+    last_result  = obs.get("last_action_result") or "None"
+    available    = obs.get("available_actions", VALID_ACTIONS)
+    patience     = obs.get("metadata", {}).get("patience_level", "?")
+    difficulty   = obs.get("metadata", {}).get("task_difficulty", "?")
     history_text = "\n".join(history[-4:]) if history else "None"
 
     return textwrap.dedent(f"""
@@ -110,15 +103,12 @@ def parse_action(response_text: str) -> str:
     if not response_text:
         return FALLBACK_ACTION
 
-    # Clean up response
     text = response_text.strip().upper()
 
-    # Direct match first
     for action in VALID_ACTIONS:
         if action in text:
             return action
 
-    # Fallback — search line by line
     for line in text.splitlines():
         line = line.strip()
         for action in VALID_ACTIONS:
@@ -135,13 +125,19 @@ def run_episode(
     env: CustomerServiceEnvClient,
     difficulty: str,
 ) -> dict:
+    # task name must match between [START] and [END]
+    task_name = f"customer_service_{difficulty}"
+
     print(f"\n{'='*60}")
     print(f"  Episode | Difficulty: {difficulty.upper()}")
     print(f"{'='*60}")
 
-    obs      = env.reset(difficulty=difficulty)
-    history  : List[str] = []
-    done     = False
+    # ── REQUIRED: START block ─────────────────────────────────
+    print(f"[START] task={task_name}", flush=True)
+
+    obs          = env.reset(difficulty=difficulty)
+    history      : List[str] = []
+    done         = False
     total_reward = 0.0
 
     print(f"Customer: {obs['customer_message']}\n")
@@ -150,7 +146,6 @@ def run_episode(
         if done:
             break
 
-        # Build prompt
         user_prompt = build_user_prompt(step, obs, history)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -174,7 +169,6 @@ def run_episode(
         action = parse_action(response_text)
         print(f"  Step {step}: {action}")
 
-        # Execute action
         obs          = env.step(action_type=action)
         reward       = obs.get("reward", 0.0)
         done         = obs.get("done", False)
@@ -186,21 +180,28 @@ def run_episode(
 
         history.append(f"Step {step}: {action} → reward {reward:+.2f}")
 
+        # ── REQUIRED: STEP block ──────────────────────────────
+        print(f"[STEP] step={step} reward={round(reward, 4)}", flush=True)
+
     # Grade the episode
     grade_result = env.grade()
     score        = grade_result.get("score", 0.0)
     resolution   = grade_result.get("state_summary", {}).get("resolution_type", "none")
+    step_count   = obs.get("step_count", 0)
 
     print(f"\n  Resolution : {resolution}")
     print(f"  Grade Score: {score:.4f}")
     print(f"{'='*60}\n")
 
+    # ── REQUIRED: END block ───────────────────────────────────
+    print(f"[END] task={task_name} score={round(score, 4)} steps={step_count}", flush=True)
+
     return {
-        "difficulty":    difficulty,
-        "score":         score,
-        "total_reward":  round(total_reward, 4),
-        "resolution":    resolution,
-        "steps":         obs.get("step_count", 0),
+        "difficulty":   difficulty,
+        "score":        score,
+        "total_reward": round(total_reward, 4),
+        "resolution":   resolution,
+        "steps":        step_count,
     }
 
 
@@ -212,16 +213,13 @@ def main():
     print(f" Env URL   : {ENV_BASE_URL}")
     print(f" API URL   : {API_BASE_URL}\n")
 
-    # Init OpenAI client
     llm_client = OpenAI(
         base_url=API_BASE_URL,
         api_key=API_KEY,
     )
 
-    # Init env client
     env = CustomerServiceEnvClient(base_url=ENV_BASE_URL)
 
-    # Check env is alive
     if not env.health():
         print("ERROR: Environment server not reachable.")
         print(f"Make sure the server is running at {ENV_BASE_URL}")
@@ -230,13 +228,13 @@ def main():
 
     print("Environment server is live.\n")
 
-    # Run all 3 tasks
+    # Run all 3 difficulty tasks
     results = []
     for difficulty in ["easy", "medium", "hard"]:
         result = run_episode(llm_client, env, difficulty)
         results.append(result)
 
-    # Final summary
+    # Final summary table
     print("\n" + "="*60)
     print("  BENCHMARK RESULTS")
     print("="*60)
