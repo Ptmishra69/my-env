@@ -22,9 +22,12 @@ from client import CustomerServiceEnvClient
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+# ✅ These are injected by validator — use os.environ
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY      = os.environ["API_KEY"]
-MODEL_NAME   = os.environ["MODEL_NAME"]
+
+# ✅ This may NOT be injected — keep a safe default
+MODEL_NAME       = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 ENV_BASE_URL     = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
